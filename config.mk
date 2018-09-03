@@ -86,9 +86,9 @@ DEBUG = false#NO SPACE
 
 # Basic configuration for some internal arrays.
 # Maximal number of hardware threads
-MAX_NUM_THREADS = 263
+MAX_NUM_THREADS = 8
 # Maximal number of sockets
-MAX_NUM_NODES = 64
+MAX_NUM_NODES = 1
 
 # Paths to some configuration files that can be used to overwrite some
 # array lengths defined at compilation
