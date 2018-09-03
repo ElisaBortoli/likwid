@@ -54,6 +54,9 @@ int (*skylake_cbox_setup)(int, RegisterIndex, PerfmonEvent *);
 
 int skl_cbox_nosetup(int cpu_id, RegisterIndex index, PerfmonEvent *event)
 {
+    cpu_id++;
+    index++;
+    event++;
     return 0;
 }
 int perfmon_init_skylake(int cpu_id)
@@ -89,6 +92,7 @@ uint32_t skl_fixed_setup(int cpu_id, RegisterIndex index, PerfmonEvent *event)
 {
     int j;
     uint32_t flags = (1ULL<<(1+(index*4)));
+    cpu_id++;
     for(j=0;j<event->numberOfOptions;j++)
     {
         switch (event->options[j].type)
@@ -119,7 +123,8 @@ int skl_pmc_setup(int cpu_id, RegisterIndex index, PerfmonEvent *event)
     /* set custom cfg and cmask */
     if ((event->cfgBits != 0) &&
         (event->eventId != 0xB7) &&
-        (event->eventId != 0xBB))
+        (event->eventId != 0xBB) &&
+        (event->eventId != 0xCD))
     {
         flags |= ((event->cmask<<8) + event->cfgBits)<<16;
     }
@@ -169,7 +174,7 @@ int skl_pmc_setup(int cpu_id, RegisterIndex index, PerfmonEvent *event)
         {
             offcore_flags = (1ULL<<event->cfgBits)|(1ULL<<event->cmask);
         }
-        VERBOSEPRINTREG(cpu_id, MSR_OFFCORE_RESP0, LLU_CAST offcore_flags, SETUP_PMC_OFFCORE);
+        VERBOSEPRINTREG(cpu_id, MSR_OFFCORE_RESP0, LLU_CAST offcore_flags, SETUP_PMC_OFFCORE0);
         CHECK_MSR_WRITE_ERROR(HPMwrite(cpu_id, MSR_DEV, MSR_OFFCORE_RESP0, offcore_flags));
     }
     else if (event->eventId == 0xBB)
@@ -178,13 +183,21 @@ int skl_pmc_setup(int cpu_id, RegisterIndex index, PerfmonEvent *event)
         {
             offcore_flags = (1ULL<<event->cfgBits)|(1ULL<<event->cmask);
         }
-        VERBOSEPRINTREG(cpu_id, MSR_OFFCORE_RESP1, LLU_CAST offcore_flags, SETUP_PMC_OFFCORE);
+        VERBOSEPRINTREG(cpu_id, MSR_OFFCORE_RESP1, LLU_CAST offcore_flags, SETUP_PMC_OFFCORE1);
         CHECK_MSR_WRITE_ERROR(HPMwrite(cpu_id, MSR_DEV, MSR_OFFCORE_RESP1, offcore_flags));
     }
-    if (event->eventId == 0xC6)
+    if ((event->eventId == 0xC6) &&
+        (event->cmask != 0))
     {
         VERBOSEPRINTREG(cpu_id, MSR_V4_PEBS_FRONTEND, LLU_CAST event->cmask, SETUP_PMC_FRONTEND);
         CHECK_MSR_WRITE_ERROR(HPMwrite(cpu_id, MSR_DEV, MSR_V4_PEBS_FRONTEND, event->cmask));
+    }
+    if ((event->eventId == 0xCD) &&
+        (cpuid_info.model == SKYLAKEX) &&
+        (event->cmask != 0))
+    {
+        VERBOSEPRINTREG(cpu_id, MSR_PEBS_LD_LAT, LLU_CAST event->cmask, SETUP_PMC_LATENCY);
+        CHECK_MSR_WRITE_ERROR(HPMwrite(cpu_id, MSR_DEV, MSR_PEBS_LD_LAT, event->cmask));
     }
     if (flags != currentConfig[cpu_id][index])
     {
@@ -239,7 +252,7 @@ int skl_ubox_setup(int cpu_id, RegisterIndex index, PerfmonEvent *event)
 int skl_uboxfix_setup(int cpu_id, RegisterIndex index, PerfmonEvent *event)
 {
     uint64_t flags = 0x0ULL;
-
+    event++;
     if (socket_lock[affinity_thread2socket_lookup[cpu_id]] != cpu_id)
     {
         return 0;
@@ -278,6 +291,8 @@ int skl_cbox_setup(int cpu_id, RegisterIndex index, PerfmonEvent *event)
                     break;
                 case EVENT_OPTION_THRESHOLD:
                     flags |= (event->options[j].value & 0x1FULL) << 24;
+                    break;
+                default:
                     break;
             }
         }
@@ -382,7 +397,7 @@ int skx_cbox_setup(int cpu_id, RegisterIndex index, PerfmonEvent *event)
     }
     else
     {
-        VERBOSEPRINTREG(cpu_id, filter0, filter_flags0, SETUP_CBOX_DEF_FILTER_STATE);
+        VERBOSEPRINTREG(cpu_id, filter1, 0x3BULL, SETUP_CBOX_DEF_FILTER_STATE);
         CHECK_MSR_WRITE_ERROR(HPMwrite(cpu_id, MSR_DEV, filter1, 0x3BULL));
     }
 
@@ -453,7 +468,7 @@ int skx_mboxfix_setup(int cpu_id, RegisterIndex index, PerfmonEvent *event)
     int j;
     uint64_t flags = 0x0ULL;
     PciDeviceIndex dev = counter_map[index].device;
-
+    event++;
     if (socket_lock[affinity_thread2socket_lookup[cpu_id]] != cpu_id)
     {
         return 0;
@@ -475,7 +490,7 @@ int skx_mboxfix_setup(int cpu_id, RegisterIndex index, PerfmonEvent *event)
 
 int skx_wbox_setup(int cpu_id, RegisterIndex index, PerfmonEvent *event)
 {
-    int j;
+    int j = 0;
     uint64_t flags = 0x0ULL;
     uint64_t filter = box_map[counter_map[index].type].filterRegister1;
     int clean_filter = 1;
@@ -734,7 +749,6 @@ int perfmon_setupCounterThread_skylake(
         PerfmonEventSet* eventSet)
 {
     int haveLock = 0;
-    uint64_t flags;
     uint64_t fixed_flags = 0x0ULL;
     int cpu_id = groupSet->threads[thread_id].processorId;
 
@@ -763,7 +777,6 @@ int perfmon_setupCounterThread_skylake(
         PerfmonEvent *event = &(eventSet->events[i].event);
         uint64_t reg = counter_map[index].configRegister;
         eventSet->events[i].threadCounter[thread_id].init = TRUE;
-        flags = 0x0ULL;
         switch (type)
         {
             case PMC:
@@ -828,6 +841,11 @@ int perfmon_setupCounterThread_skylake(
                 skylake_cbox_setup(cpu_id, index, event);
                 break;
             case MBOX0:
+                if (!cpuid_info.supportClientmem)
+                {
+                    skx_mbox_setup(cpu_id, index, event);
+                }
+                break;
             case MBOX1:
             case MBOX2:
             case MBOX3:
@@ -983,8 +1001,23 @@ int perfmon_startCountersThread_skylake(int thread_id, PerfmonEventSet* eventSet
                         CHECK_MSR_WRITE_ERROR(HPMwrite(cpu_id, dev, counter1, 0x0ULL));
                     }
                     break;
-                case WBOX:
                 case MBOX0:
+                    if (haveLock)
+                    {
+                        if (!cpuid_info.supportClientmem)
+                        {
+                            VERBOSEPRINTREG(cpu_id, counter1, 0x0ULL, CLEAR_BOX)
+                            CHECK_MSR_WRITE_ERROR(HPMwrite(cpu_id, dev, counter1, 0x0ULL));
+                        }
+                        else
+                        {
+                            CHECK_MSR_READ_ERROR(HPMread(cpu_id, dev, counter1, &tmp));
+                            eventSet->events[i].threadCounter[thread_id].startData = field64(tmp, 0, box_map[type].regWidth);
+                            VERBOSEPRINTREG(cpu_id, counter1, LLU_CAST tmp, READ_MBOX)
+                        }
+                    }
+                    break;
+                case WBOX:
                 case MBOX1:
                 case MBOX2:
                 case MBOX3:
@@ -1064,11 +1097,11 @@ int perfmon_startCountersThread_skylake(int thread_id, PerfmonEventSet* eventSet
     { \
         uint64_t ovf_values = 0x0ULL; \
         CHECK_MSR_READ_ERROR(HPMread(cpu_id, MSR_DEV, MSR_PERF_GLOBAL_STATUS, &ovf_values)); \
-        if (ovf_values & (1ULL<<offset)) \
+        if (ovf_values & (1ULL<<(offset))) \
         { \
             eventSet->events[i].threadCounter[thread_id].overflows++; \
         } \
-        CHECK_MSR_WRITE_ERROR(HPMwrite(cpu_id, MSR_DEV, MSR_PERF_GLOBAL_OVF_CTRL, (1ULL<<offset))); \
+        CHECK_MSR_WRITE_ERROR(HPMwrite(cpu_id, MSR_DEV, MSR_PERF_GLOBAL_OVF_CTRL, (1ULL<<(offset)))); \
     }
 
 #define SKL_CHECK_UNCORE_OVERFLOW(offset) \
@@ -1076,7 +1109,7 @@ int perfmon_startCountersThread_skylake(int thread_id, PerfmonEventSet* eventSet
     { \
         uint64_t ovf_values = 0x0ULL; \
         CHECK_MSR_READ_ERROR(HPMread(cpu_id, MSR_DEV, MSR_V4_UNC_PERF_GLOBAL_STATUS, &ovf_values)); \
-        if (ovf_values & (1ULL<<offset)) \
+        if (ovf_values & (1ULL<<(offset))) \
         { \
             eventSet->events[i].threadCounter[thread_id].overflows++; \
         } \
@@ -1088,10 +1121,10 @@ int perfmon_startCountersThread_skylake(int thread_id, PerfmonEventSet* eventSet
         uint64_t ovf_values = 0x0ULL; \
         uint64_t offset = getCounterTypeOffset(eventSet->events[i].index); \
         CHECK_MSR_READ_ERROR(HPMread(cpu_id, MSR_DEV, box_map[eventSet->events[i].type].statusRegister, &ovf_values)); \
-        if (ovf_values & (1ULL<<offset)) \
+        if (ovf_values & (1ULL<<(offset))) \
         { \
             eventSet->events[i].threadCounter[thread_id].overflows++; \
-            CHECK_MSR_WRITE_ERROR(HPMwrite(cpu_id, MSR_DEV, box_map[eventSet->events[i].type].statusRegister, (1ULL<<offset))); \
+            CHECK_MSR_WRITE_ERROR(HPMwrite(cpu_id, MSR_DEV, box_map[eventSet->events[i].type].statusRegister, (1ULL<<(offset)))); \
         } \
     }
 
@@ -1104,6 +1137,7 @@ int skl_uncore_read(int cpu_id, RegisterIndex index, PerfmonEvent *event,
     RegisterType type = counter_map[index].type;
     PciDeviceIndex dev = counter_map[index].device;
     uint64_t counter1 = counter_map[index].counterRegister;
+    event++;
     if (socket_lock[affinity_thread2socket_lookup[cpu_id]] != cpu_id)
     {
         return 0;
@@ -1122,7 +1156,7 @@ int skl_uncore_read(int cpu_id, RegisterIndex index, PerfmonEvent *event,
     if (result < *cur_result)
     {
         uint64_t ovf_values = 0x0ULL;
-        int global_offset = box_map[type].ovflOffset;
+        //int global_offset = box_map[type].ovflOffset;
         int test_local = 0;
         uint32_t global_status_reg = MSR_UNC_V3_U_PMON_GLOBAL_STATUS;
         if (cpuid_info.model != SKYLAKEX)
@@ -1311,12 +1345,31 @@ int perfmon_stopCountersThread_skylake(int thread_id, PerfmonEventSet* eventSet)
                     }
                     break;
                 case MBOX0:
+                    if (haveLock)
+                    {
+                        if (!cpuid_info.supportClientmem)
+                        {
+                            skl_uncore_read(cpu_id, index, event, current, overflows,
+                                            FREEZE_FLAG_CLEAR_CTR, ovf_offset, getCounterTypeOffset(index)+1);
+                            counter_result = *current;
+                        }
+                        else
+                        {
+                            CHECK_MSR_READ_ERROR(HPMread(cpu_id, PCI_IMC_DEVICE_0_CH_0, counter1, &counter_result));
+                            if (counter_result < eventSet->events[i].threadCounter[thread_id].counterData)
+                            {
+                                VERBOSEPRINTREG(cpu_id, counter1, LLU_CAST counter_result, OVERFLOW_CLIENTMEM)
+                                eventSet->events[i].threadCounter[thread_id].overflows++;
+                            }
+                        }
+                        VERBOSEPRINTREG(cpu_id, counter1, LLU_CAST counter_result, READ_MBOX)
+                    }
+                    break;
                 case MBOX1:
                 case MBOX2:
                 case MBOX3:
                 case MBOX4:
                 case MBOX5:
-
                     skl_uncore_read(cpu_id, index, event, current, overflows,
                                     FREEZE_FLAG_CLEAR_CTR, ovf_offset, getCounterTypeOffset(index)+1);
                     counter_result = *current;
@@ -1517,6 +1570,26 @@ int perfmon_readCountersThread_skylake(int thread_id, PerfmonEventSet* eventSet)
                     }
                     break;
                 case MBOX0:
+                    if (haveLock)
+                    {
+                        if (!cpuid_info.supportClientmem)
+                        {
+                            skl_uncore_read(cpu_id, index, event, current, overflows,
+                                            FREEZE_FLAG_CLEAR_CTR, ovf_offset, getCounterTypeOffset(index)+1);
+                            counter_result = *current;
+                        }
+                        else
+                        {
+                            CHECK_MSR_READ_ERROR(HPMread(cpu_id, dev, counter1, &counter_result));
+                            if (counter_result < eventSet->events[i].threadCounter[thread_id].counterData)
+                            {
+                                VERBOSEPRINTREG(cpu_id, counter1, LLU_CAST counter_result, OVERFLOW_CLIENTMEM)
+                                eventSet->events[i].threadCounter[thread_id].overflows++;
+                            }
+                        }
+                        VERBOSEPRINTREG(cpu_id, counter1, LLU_CAST counter_result, READ_MBOX)
+                    }
+                    break;
                 case MBOX1:
                 case MBOX2:
                 case MBOX3:
@@ -1613,13 +1686,23 @@ int perfmon_finalizeCountersThread_skylake(int thread_id, PerfmonEventSet* event
                 ovf_values_core |= (1ULL<<(index-cpuid_info.perf_num_fixed_ctr));
                 if ((haveTileLock) && (eventSet->events[i].event.eventId == 0xB7))
                 {
-                    VERBOSEPRINTREG(cpu_id, MSR_OFFCORE_RESP0, 0x0ULL, CLEAR_OFFCORE_RESP0);
+                    VERBOSEPRINTREG(cpu_id, MSR_OFFCORE_RESP0, 0x0ULL, CLEAR_PMC_OFFCORE0);
                     CHECK_MSR_WRITE_ERROR(HPMwrite(cpu_id, MSR_DEV, MSR_OFFCORE_RESP0, 0x0ULL));
                 }
                 else if ((haveTileLock) && (eventSet->events[i].event.eventId == 0xBB))
                 {
-                    VERBOSEPRINTREG(cpu_id, MSR_OFFCORE_RESP1, 0x0ULL, CLEAR_OFFCORE_RESP1);
+                    VERBOSEPRINTREG(cpu_id, MSR_OFFCORE_RESP1, 0x0ULL, CLEAR_PMC_OFFCORE1);
                     CHECK_MSR_WRITE_ERROR(HPMwrite(cpu_id, MSR_DEV, MSR_OFFCORE_RESP1, 0x0ULL));
+                }
+                else if (eventSet->events[i].event.eventId == 0xCD)
+                {
+                    VERBOSEPRINTREG(cpu_id, MSR_PEBS_LD_LAT, 0x0ULL, CLEAR_PMC_LATENCY);
+                    CHECK_MSR_WRITE_ERROR(HPMwrite(cpu_id, MSR_DEV, MSR_PEBS_LD_LAT, 0x0ULL));
+                }
+                else if (eventSet->events[i].event.eventId == 0xC6)
+                {
+                    VERBOSEPRINTREG(cpu_id, MSR_V4_PEBS_FRONTEND, 0x0ULL, CLEAR_PMC_FRONTEND);
+                    CHECK_MSR_WRITE_ERROR(HPMwrite(cpu_id, MSR_DEV, MSR_V4_PEBS_FRONTEND, 0x0ULL));
                 }
                 break;
             case FIXED:

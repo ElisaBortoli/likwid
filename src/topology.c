@@ -78,6 +78,7 @@ static char* skylake_str = "Intel Skylake processor";
 static char* skylakeX_str = "Intel Skylake SP processor";
 static char* kabylake_str = "Intel Kabylake processor";
 static char* cannonlake_str = "Intel Cannonlake processor";
+static char* coffeelake_str = "Intel Coffeelake processor";
 static char* nehalem_ex_str = "Intel Nehalem EX processor";
 static char* westmere_ex_str = "Intel Westmere EX processor";
 static char* xeon_mp_string = "Intel Xeon MP processor";
@@ -130,7 +131,6 @@ static char* short_kabylake = "skylake";
 static char* short_cannonlake = "cannonlake";
 static char* short_phi = "phi";
 static char* short_phi2 = "knl";
-static char* short_phi3 = "kml";
 static char* short_k8 = "k8";
 static char* short_k10 = "k10";
 static char* short_k15 = "interlagos";
@@ -193,7 +193,7 @@ initTopologyFile(FILE* file)
 }
 
 static int
-readTopologyFile(const char* filename)
+readTopologyFile(const char* filename, cpu_set_t cpuSet)
 {
     FILE* fp;
     char structure[256];
@@ -309,6 +309,14 @@ readTopologyFile(const char* filename)
                 else if (strcmp(value, "apicId") == 0)
                 {
                     cpuid_topology.threadPool[thread].apicId = tmp;
+                    if (CPU_ISSET(tmp, &cpuSet))
+                    {
+                        cpuid_topology.threadPool[thread].inCpuSet = 1;
+                    }
+                    else
+                    {
+                        cpuid_topology.threadPool[thread].inCpuSet = 0;
+                    }
                 }
 
             }
@@ -621,6 +629,7 @@ topology_setName(void)
                 case HASWELL:
                 case HASWELL_M1:
                 case HASWELL_M2:
+                    cpuid_info.supportClientmem = 1;
                     cpuid_info.name = haswell_str;
                     cpuid_info.short_name = short_haswell;
                     break;
@@ -646,6 +655,7 @@ topology_setName(void)
 
                 case SKYLAKE1:
                 case SKYLAKE2:
+                    cpuid_info.supportClientmem = 1;
                     cpuid_info.name = skylake_str;
                     cpuid_info.short_name = short_skylake;
                     break;
@@ -656,8 +666,12 @@ topology_setName(void)
                     break;
 
                 case KABYLAKE1:
-                case KABYLAKE2:
                     cpuid_info.name = kabylake_str;
+                    cpuid_info.short_name = short_skylake;
+                    break;
+
+                case KABYLAKE2:
+                    cpuid_info.name = coffeelake_str;
                     cpuid_info.short_name = short_skylake;
                     break;
 
@@ -1003,9 +1017,9 @@ standard_init:
     else
     {
         CPU_ZERO(&cpuSet);
-        sched_getaffinity(0,sizeof(cpu_set_t), &cpuSet);
+        sched_getaffinity(0, sizeof(cpu_set_t), &cpuSet);
         DEBUG_PRINT(DEBUGLEV_INFO, Reading topology information from %s, config.topologyCfgFileName);
-        ret = readTopologyFile(config.topologyCfgFileName);
+        ret = readTopologyFile(config.topologyCfgFileName, cpuSet);
         if (ret < 0)
             goto standard_init;
         cpuid_topology.activeHWThreads = 0;
@@ -1120,6 +1134,9 @@ print_supportedCPUs (void)
     printf("\t%s\n",atom_goldmont_str);
     printf("\t%s\n",xeon_phi2_string);
     printf("\t%s\n",skylakeX_str);
+    printf("\t%s\n",xeon_phi3_string);
+    printf("\t%s\n",kabylake_str);
+    printf("\t%s\n",coffeelake_str);
     printf("\n");
     printf("Supported AMD processors:\n");
     printf("\t%s\n",opteron_sc_str);

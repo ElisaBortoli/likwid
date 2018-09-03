@@ -498,6 +498,8 @@ likwid_markerRegisterRegion(const char* regionTag)
         return -EFAULT;
     }
     TimerData timer;
+    int ret = 0;
+    uint64_t tmp = 0x0ULL;
     bstring tag = bfromcstralloc(100, regionTag);
     LikwidThreadResults* results;
     char groupSuffix[10];
@@ -505,11 +507,14 @@ likwid_markerRegisterRegion(const char* regionTag)
     bcatcstr(tag, groupSuffix);
     int cpu_id = hashTable_get(tag, &results);
     bdestroy(tag);
-//#ifdef LIKWID_USE_PERFEVENT
-    return HPMaddThread(cpu_id);
-//#else
-//    return 0;
-//#endif
+
+    // Add CPU to access layer
+    ret =  HPMaddThread(cpu_id);
+    // Perform one access to fully initialize connection to access daemon
+    uint32_t reg = counter_map[groupSet->groups[groups[0]].events[0].index].counterRegister;
+    HPMread(cpu_id, MSR_DEV, reg, &tmp);
+
+    return ret;
 }
 
 int
@@ -667,14 +672,23 @@ likwid_markerGetRegion(
 
     cpu_id = hashTable_get(tag, &results);
     thread_id = getThreadID(myCPU);
-    *count = results->count;
-    *time = results->time;
-    length = MIN(groupSet->groups[groupSet->activeGroup].numberOfEvents, *nr_events);
-    for(int i=0;i<length;i++)
+    if (count != NULL)
     {
-        events[i] = results->PMcounters[i];
+        *count = results->count;
     }
-    *nr_events = length;
+    if (time != NULL)
+    {
+        *time = results->time;
+    }
+    if (nr_events != NULL && events != NULL && *nr_events > 0)
+    {
+        length = MIN(groupSet->groups[groupSet->activeGroup].numberOfEvents, *nr_events);
+        for(int i=0;i<length;i++)
+        {
+            events[i] = results->PMcounters[i];
+        }
+        *nr_events = length;
+    }
     bdestroy(tag);
     return;
 }

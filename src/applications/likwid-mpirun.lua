@@ -572,7 +572,7 @@ local function writeHostfileSlurm(hostlist, filename)
     cmd = string.format("scontrol show hostlist %s", table.concat(l,","))
     f = io.popen(cmd, 'r')
     if f ~= nil then
-        likwid.setenv("SLURM_NODELIST", f:read('*a'))
+        likwid.setenv("SLURM_NODELIST", f:read('*l'))
         f:close()
     else
         print_stderr("ERROR: Cannot transform list of hosts to SLURM hostlist format")
@@ -1101,7 +1101,7 @@ local function setPerfStrings(perflist, cpuexprs)
                 local slist = {}
                 for j, cpu in pairs(cpuexpr) do
                     for l, socklist in pairs(socketList) do
-                        if inList(cpu, socklist) then
+                        if inList(tonumber(cpu), socklist) then
                             table.insert(slist, l)
                         end
                     end
